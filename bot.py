@@ -149,6 +149,6 @@ def main():
     app.add_handler(conv_handler)
     print("Бот запущено...")
     app.run_polling()
-clear
+
 if __name__ == "__main__":
     main()
