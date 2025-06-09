@@ -1,25 +1,20 @@
 import os
 from dotenv import load_dotenv
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from flask import Flask, request
+from telegram import Bot, Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
-    ApplicationBuilder, CommandHandler, CallbackQueryHandler,
-    ContextTypes, ConversationHandler, MessageHandler, filters
+    Application, Dispatcher, CommandHandler, CallbackQueryHandler,
+    ConversationHandler, ContextTypes
 )
 
 # Завантажити змінні середовища
 load_dotenv()
-TOKEN = "7784019887:AAED0R6gwR3bNdQ8aYy1NFcoGi1VBaZKlEk"
-print(">>> TOKEN=", TOKEN)
-SELLER_ID = 1227954847  # Твій Telegram ID
+TOKEN = os.getenv("7784019887:AAED0R6gwR3bNdQ8aYy1NFcoGi1VBaZKlEk")
+SELLER_ID = int(os.getenv("1227954847", "0"))
 
-# Стани розмови
 CHOOSING_CATEGORY, CHOOSING_PRODUCT, CONFIRMING_CART = range(3)
-
-# Каталог товарів
 products = {
-    "Картриджи": {
-        "Vaporesso XROS 0.6 Ом, 2 мл": 150,
-    },
+    "Картриджи": {"Vaporesso XROS 0.6 Ом, 2 мл": 150},
     "Рідини": {
         "Lucky 15 ml 5% WILD BERRIES": 160,
         "Lucky 15 ml 5% BERRY LEMONADE": 160,
@@ -27,13 +22,15 @@ products = {
         "Chaser 10ml 5% BLUE RASPBERRY": 140,
         "Chaser 15ml 5% CHERRIES": 170,
         "Chaser 15ml 5% BLACKBERRY": 170,
-        "Chaser 30ml 5% WILD STRAWBERRY KIWI": 300,
+        "Chaser 30ml 5% WILD STRAWBERRY KIWI": 300
     }
 }
+user_carts = {}
 
-user_carts = {}  # user_id -> {product: quantity}
+app = Flask(__name__)
+bot = Bot(TOKEN)
+dispatcher = Dispatcher(bot=bot, update_queue=None, use_context=True)
 
-# --- Хендлери ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [[InlineKeyboardButton("Shop 🛒", callback_data="shop")]]
     markup = InlineKeyboardMarkup(keyboard)
@@ -110,7 +107,7 @@ async def confirm_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
     order_text += f"\nЗагальна сума: {total} грн"
 
     await context.bot.send_message(chat_id=SELLER_ID, text=order_text)
-    user_carts[user_id] = {}  # очищення кошика
+    user_carts[user_id] = {}
     await query.edit_message_text("Дякуємо за замовлення! Продавець отримав його.")
     return ConversationHandler.END
 
@@ -121,14 +118,19 @@ async def continue_shopping(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.edit_message_text("Оберіть категорію:", reply_markup=InlineKeyboardMarkup(keyboard))
     return CHOOSING_PRODUCT
 
-async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Скасовано.")
-    return ConversationHandler.END
+@app.route(f"/{TOKEN}", methods=["POST"])
+def webhook():
+    update = Update.de_json(request.get_json(force=True), bot)
+    dispatcher.process_update(update)
+    return "OK"
 
-# --- Запуск ---
-def main():
-    app = ApplicationBuilder().token(TOKEN).build()
+@app.route("/")
+def index():
+    return "Бот працює через Webhook \U0001f7e2"
 
+if __name__ == '__main__':
+    from telegram.ext import ApplicationBuilder
+    application = ApplicationBuilder().token(TOKEN).build()
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler("start", start)],
         states={
@@ -136,19 +138,14 @@ def main():
             CHOOSING_PRODUCT: [
                 CallbackQueryHandler(category_chosen, pattern="^category_"),
                 CallbackQueryHandler(add_to_cart, pattern="^add_"),
-                CallbackQueryHandler(view_cart, pattern="^view_cart$"),
+                CallbackQueryHandler(view_cart, pattern="^view_cart$")
             ],
             CONFIRMING_CART: [
                 CallbackQueryHandler(confirm_order, pattern="^confirm_order$"),
-                CallbackQueryHandler(continue_shopping, pattern="^continue_shopping$"),
-            ],
+                CallbackQueryHandler(continue_shopping, pattern="^continue_shopping$")
+            ]
         },
-        fallbacks=[MessageHandler(filters.COMMAND, cancel)],
+        fallbacks=[]
     )
-
-    app.add_handler(conv_handler)
-    print("Бот запущено...")
-    app.run_polling()
-
-if __name__ == "__main__":
-    main()
+    application.add_handler(conv_handler)
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
